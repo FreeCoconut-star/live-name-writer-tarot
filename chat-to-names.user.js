@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         YouTube Chat -> Name Writer relay
 // @match        https://www.youtube.com/live_chat*
+// @match        https://studio.youtube.com/live_chat*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @run-at       document-idle
@@ -21,7 +22,8 @@
   function send(author, text, paid) {
     GM_xmlhttpRequest({
       method: 'POST', url: RELAY, data: JSON.stringify({ author, text, paid }),
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      onerror: () => console.log('[name-writer] could not reach the relay - is the black window open?')
     });
   }
 
@@ -50,6 +52,6 @@
     new MutationObserver(muts => {
       for (const m of muts) m.addedNodes.forEach(n => handle(n, false));
     }).observe(items, { childList: true });
-    console.log('[name-writer] watching chat');
+    console.log('[name-writer] watching chat on', location.href);
   }, 1000);
 })();
