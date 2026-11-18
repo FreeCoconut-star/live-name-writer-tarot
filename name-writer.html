@@ -2,60 +2,61 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Live Name Writer</title>
-<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Fredoka:wght@600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Dancing+Script:wght@700&family=Pacifico&family=Fredoka:wght@600&display=swap" rel="stylesheet">
 <style>
 html,body{margin:0;height:100%;background:#070714;overflow:hidden}
 #game{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
-#ui{position:fixed;left:8px;top:8px;z-index:5;width:210px;font:12px sans-serif;color:#fff;background:#000c;padding:10px;border-radius:10px;display:flex;flex-direction:column;gap:6px}
-#ui input,#ui select,#ui button{font:inherit;padding:5px;border-radius:6px;border:0;width:100%;box-sizing:border-box}
+#ui{position:fixed;left:8px;top:8px;z-index:5;width:340px;max-height:calc(100% - 20px);overflow:auto;font:12px sans-serif;color:#fff;background:#000d;padding:10px;border-radius:10px;display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
+#ui input,#ui select,#ui button,#ui textarea{font:inherit;padding:5px;border-radius:6px;border:0;width:100%;box-sizing:border-box}
+#ui textarea{resize:vertical;font-size:12px}
 #ui button{background:#ff4fd8;color:#fff;cursor:pointer}
-#status{opacity:.8;min-height:2em}
+#ui button.alt{background:#555}
+#ui input[type=range]{padding:0}
+#ui input[type=color]{height:30px;padding:2px;cursor:pointer}
+#ui input[type=checkbox]{width:auto}
+#status{opacity:.85;min-height:2em}
 .clean #ui{display:none}
+#head{display:flex;justify-content:space-between;align-items:center}
+#head button{width:auto;padding:3px 8px}
+#testrow{display:flex;gap:4px}
+#testrow button{width:auto;white-space:nowrap}
+#tabs{display:flex;flex-wrap:wrap;gap:4px}
+#tabs button{width:auto;flex:1;padding:5px 4px;background:#3a3a46}
+#tabs button.on{background:#ff4fd8}
+.pane{display:none;flex-direction:column;gap:8px}
+.pane.on{display:flex}
+.ctl{display:flex;flex-direction:column;gap:3px}
+.ctl.row{flex-direction:row;align-items:center;gap:6px}
+.cap{display:flex;align-items:center;gap:4px}
+.tipi{display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:#fff3;font-size:10px;cursor:help;flex:none}
+h4{margin:6px 0 0;font-size:12px;color:#ffd1f5;border-bottom:1px solid #fff3;padding-bottom:2px}
+.note{opacity:.75;line-height:1.4}
+#foot{display:flex;gap:4px}
+#tipbox{position:fixed;z-index:20;max-width:270px;background:#111;border:1px solid #ff4fd8;padding:6px 8px;border-radius:6px;font:12px/1.4 sans-serif;color:#fff;pointer-events:none;display:none;white-space:pre-wrap}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
 </head><body>
 <div id="ui">
-  <b>Name Writer</b>
-  <input id="vid" placeholder="Live video ID">
-  <input id="key" placeholder="YouTube API key" type="password">
-  <select id="mode">
-    <option value="cmd">Chat command: !name Alex</option>
-    <option value="any">Every chatter's display name</option>
-  </select>
-  <label><input id="paid" type="checkbox" style="width:auto"> Super Chat only</label>
-  <button id="go">Connect to chat</button>
-  <input id="test" placeholder="Test a name…">
-  <button id="add">Write it</button>
-  <div id="status">Not connected</div>
+  <div id="head"><b>Name Writer – control panel</b><button id="hide" class="alt">Hide</button></div>
+  <div id="main" style="display:flex;flex-direction:column;gap:6px">
+    <div id="status">Not connected</div>
+    <div id="testrow"><input id="test" placeholder="Test a name (also shows in OBS)…"><button id="add">Write it</button></div>
+    <div id="tabs"></div>
+    <div id="panes"></div>
+    <div id="foot"><button id="resettab" class="alt">Reset this tab</button><button id="reset" class="alt">Reset all</button></div>
+  </div>
 </div>
+<div id="tipbox"></div>
 <div id="game"></div>
 <script>
 const W = 1080, H = 1920;           // 9:16 for Shorts
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-if (params.get('clean')) document.body.classList.add('clean');
-try { $('vid').value = params.get('video') || localStorage.nw_vid || ''; $('key').value = params.get('key') || localStorage.nw_key || ''; } catch (e) {}
+const clean = !!params.get('clean');
+if (clean) document.body.classList.add('clean');
+const status = s => $('status').textContent = s;
 
-if (params.get('mode')) $('mode').value = params.get('mode');
-$('paid').checked = params.get('paid') === '1';
-let scene = null;
-const queue = [], lastSeen = {};
-function enqueue(name, who, paid) {
-  name = (name || '').replace(/^@/, '').replace(/\s+/g, ' ').trim().slice(0, 24);
-  if (!name) return;
-  if (!paid) {                                              // 1 free reading per person / 2 min
-    const k = (who || name).toLowerCase(), now = Date.now();
-    if (lastSeen[k] && now - lastSeen[k] < 120000) return;
-    lastSeen[k] = now;
-  }
-  const item = { name, paid: !!paid };
-  const i = queue.findIndex(q => !q.paid);                  // Super Chats jump the line
-  if (paid) queue.splice(i < 0 ? queue.length : i, 0, item); else queue.push(item);
-  if (scene) scene.next();
-}
-
-const HOLD_MS = 9000;                       // how long the reading stays on screen
-const CW = 250, CH = 400, CY = 1190, CX = [200, 540, 880], DECK = [540, 1190];
+// ---------- default tarot cards and closing lines (editable in the panel) ----------
 const CARDS = [
   ['The Fool', '🐕', 'a leap of faith'], ['The Magician', '🪄', 'the power to make it happen'],
   ['The High Priestess', '🌙', 'quiet intuition'], ['The Empress', '🌹', 'abundance and care'],
@@ -70,25 +71,264 @@ const CARDS = [
   ['Judgement', '📯', 'a calling to rise'], ['The World', '🌍', 'completion and wholeness']
 ];
 const CLOSERS = [
-  n => `${n}, trust the path. The cards are on your side.`,
-  n => `${n}, big things are moving your way.`,
-  n => `${n}, stay curious. The next chapter is yours to write.`,
-  n => `${n}, the stars lean in your favour.`
+  '{name}, trust the path. The cards are on your side.', '{name}, big things are moving your way.',
+  '{name}, stay curious. The next chapter is yours to write.', '{name}, the stars lean in your favour.'
 ];
+
+// ---------- settings: URL parameter > live from relay > saved in this browser > default ----------
+const R = (tab, k, label, def, min, max, step, unit, tip) => ({ tab, k, label, type: 'range', def, min, max, step, unit, tip });
+const C = (tab, k, label, def, tip) => ({ tab, k, label, type: 'color', def, tip });
+const T = (tab, k, label, def, max, tip) => ({ tab, k, label, type: 'text', def, max, tip });
+const A = (tab, k, label, def, max, rows, tip) => ({ tab, k, label, type: 'area', def, max, rows, tip });
+const K = (tab, k, label, def, tip) => ({ tab, k, label, type: 'check', def, tip });
+const SEL = (tab, k, label, def, opts, tip) => ({ tab, k, label, type: 'select', def, opts, tip });
+const HD = (tab, h) => ({ tab, h });
+const TABS = [['chat', 'Chat'], ['timing', 'Timing'], ['text', 'Text'], ['cards', 'Cards'], ['look', 'Look'], ['layout', 'Layout'], ['connect', 'Connect']];
+const DEFS = [
+  // ----- Chat -----
+  SEL('chat', 'mode', 'Who gets a reading', 'any', [['any', "Every chatter's display name"], ['text', 'Type your name (the chat text is the name)'], ['cmd', 'Chat command only (!name Alex)']],
+    'Every chatter: anyone who writes in chat gets a reading under their own display name.\nType your name: what the viewer types is the name, for example just "Priya". Long sentences, links and messages without letters are ignored.\nCommand only: only people who type the command (for example !name Alex) get one.\nIn every mode the command (!name Alex) still works.'),
+  K('chat', 'paid', 'Super Chat / Super Sticker only', false, 'When ticked, only people who paid get a reading. Free chat is ignored.'),
+  R('chat', 'cooldown', 'Free viewers: wait between readings', 120, 0, 600, 10, ' s', 'How long a free viewer must wait before they can get another reading. 0 = no wait. Super Chats never wait.'),
+  R('chat', 'queue', 'Free names kept waiting', 8, 1, 50, 1, '', 'How many free viewers can wait in line. When the line is full the oldest waiting name is dropped. Raise this on busy streams so more people get a turn.'),
+  R('chat', 'maxwords', 'Most words in a typed name', 3, 1, 5, 1, '', 'Used in "Type your name" mode: messages with more words than this are ignored, so normal chat is not turned into names. 3 allows names like "Mary Ann Smith".'),
+  R('chat', 'maxlen', 'Longest name allowed', 24, 8, 40, 1, ' letters', 'Longer names are cut off after this many characters.'),
+  T('chat', 'cmdwords', 'Command words (comma separated)', 'name,write', 60, 'Words viewers can type after "!" to choose a name. With "name,write", both !name Alex and !write Alex work. Use letters and numbers only.'),
+  // ----- Timing -----
+  R('timing', 'hold', 'Reading stays on screen', 9, 3, 30, 1, ' s', 'How long the finished reading (name, cards and text) stays visible before the next person.'),
+  R('timing', 'speed', 'Card shuffle, deal & flip speed', 1.5, 0.5, 3, 0.1, '×', 'Higher = faster card animations.'),
+  R('timing', 'shuffles', 'Number of shuffles', 1, 0, 3, 1, '', 'How many times the card pile is shuffled before dealing. 0 = deal straight away.'),
+  R('timing', 'write', 'Name writing speed', 1, 0.5, 3, 0.1, '×', 'Higher = the name is written faster.'),
+  // ----- Text -----
+  HD('text', 'Top of the screen'),
+  T('text', 'title_any', 'Title when everyone gets a reading', 'SAY HI IN CHAT', 40, 'Big heading shown while the mode is "Every chatter".'),
+  T('text', 'title_cmd', 'Title in command mode', 'TYPE  !name YOUR NAME', 40, 'Big heading shown while the mode is "Chat command only". Change it if you change the command words.'),
+  T('text', 'title_text', 'Title in type-your-name mode', 'TYPE YOUR NAME IN CHAT', 40, 'Big heading shown while the mode is "Type your name".'),
+  T('text', 'subtitle', 'Line under the title', 'for your tarot reading 🔮', 50, 'Smaller line under the big heading.'),
+  HD('text', 'Waiting counter (bottom)'),
+  T('text', 'waiting', 'Waiting counter text', '{n} waiting…', 40, 'Shown at the bottom when people are in line. {n} becomes the number waiting. Leave empty to hide it.'),
+  HD('text', 'Reading'),
+  T('text', 'lbl1', 'First card label', 'Past', 20, 'Label in front of the first card’s meaning.'),
+  T('text', 'lbl2', 'Second card label', 'Present', 20, 'Label in front of the second card’s meaning.'),
+  T('text', 'lbl3', 'Third card label', 'Future', 20, 'Label in front of the third card’s meaning.'),
+  A('text', 'closers', 'Closing lines (one per line)', CLOSERS.join('\n'), 1500, 6, 'One line is picked at random for each reading. {name} is replaced by the viewer’s name. Empty = use the built-in lines.'),
+  // ----- Cards -----
+  HD('cards', 'One card per line:  Name | emoji | meaning'),
+  A('cards', 'cards', 'Card deck', CARDS.map(c => c.join(' | ')).join('\n'), 4000, 16, 'Three cards are drawn at random for each reading. Each line needs three parts separated by | : the card name, one emoji, and the meaning shown in the reading. You need at least 3 valid lines, otherwise the built-in deck is used.'),
+  // ----- Look -----
+  HD('look', 'Background'),
+  C('look', 'bg1', 'Top colour', '#1a0b3b', 'Background colour at the top.'),
+  C('look', 'bg2', 'Middle colour', '#0b1b4a', 'Background colour in the middle.'),
+  C('look', 'bg3', 'Bottom colour', '#2a0b3b', 'Background colour at the bottom.'),
+  K('look', 'fx', 'Floating stars & sparkles', true, 'Turn off to remove the floating lights and sparkle bursts (lighter on slow computers).'),
+  HD('look', 'The written name'),
+  SEL('look', 'font', 'Handwriting font', 'Caveat', [['Caveat', 'Caveat'], ['Dancing Script', 'Dancing Script'], ['Pacifico', 'Pacifico']], 'Font used for the name. Fonts are loaded from the internet; if one does not load, a plain cursive font is used.'),
+  C('look', 'ncol', 'Name colour (free)', '#ffffff', 'Fill colour of a free viewer’s name.'),
+  C('look', 'nstroke', 'Name outline (free)', '#ff4fd8', 'Outline colour of a free viewer’s name.'),
+  C('look', 'pcol', 'Name colour (Super Chat)', '#ffe28a', 'Fill colour of a Super Chat name.'),
+  C('look', 'pstroke', 'Name outline (Super Chat)', '#ff9a00', 'Outline colour of a Super Chat name.'),
+  C('look', 'glow', 'Glow colour', '#00e5ff', 'Glow around the name and the title.'),
+  HD('look', 'Text colours'),
+  C('look', 'tcol', 'Title', '#ffffff', 'Colour of the big heading.'),
+  C('look', 'scol', 'Line under title', '#ffd1f5', 'Colour of the smaller line under the heading.'),
+  C('look', 'rcol', 'Reading text', '#fff3c9', 'Colour of the reading shown under the cards.'),
+  C('look', 'qcol', 'Waiting counter', '#9fe8ff', 'Colour of the waiting counter at the bottom.'),
+  HD('look', 'Cards'),
+  C('look', 'cback', 'Card back', '#2a1060', 'Colour of the face-down cards.'),
+  C('look', 'cgold', 'Card back trim & star', '#ffd36b', 'Colour of the gold border and star on the card back.'),
+  C('look', 'cface', 'Card front', '#fff4dc', 'Colour of the flipped card.'),
+  C('look', 'cedge', 'Card front border', '#c9922e', 'Border colour of the flipped card.'),
+  C('look', 'cname', 'Card name text', '#3b1a5a', 'Colour of the card name written on the flipped card.'),
+  // ----- Layout -----
+  HD('layout', 'Text sizes'),
+  R('layout', 'tsize', 'Title size', 64, 30, 110, 1, ' px', 'Size of the big heading.'),
+  R('layout', 'ssize', 'Line-under-title size', 42, 20, 80, 1, ' px', 'Size of the smaller line.'),
+  R('layout', 'nsize', 'Name size', 260, 120, 340, 5, ' px', 'Size of the written name. Very long names shrink to fit automatically.'),
+  R('layout', 'npad', 'Name edge padding', 40, 0, 120, 5, ' px', 'Extra room around the written name so the last letter, the tails of letters and the glow are not cut off. Raise it if a letter still looks chopped.'),
+  R('layout', 'rsize', 'Reading text size', 38, 24, 60, 1, ' px', 'Size of the reading text.'),
+  HD('layout', 'Vertical positions (pixels from the top of 1920)'),
+  R('layout', 'ty', 'Title', 150, 40, 400, 5, '', 'Position of the big heading.'),
+  R('layout', 'sy', 'Line under title', 225, 100, 500, 5, '', 'Position of the smaller line.'),
+  R('layout', 'ny', 'Name', 760, 400, 1000, 10, '', 'Position of the written name.'),
+  R('layout', 'cy', 'Cards', 1190, 900, 1500, 10, '', 'Position of the row of cards.'),
+  R('layout', 'ry', 'Reading text', 1420, 1100, 1800, 10, '', 'Position of the reading text (top of the text).'),
+  R('layout', 'qy', 'Waiting counter', 1870, 1500, 1900, 10, '', 'Position of the waiting counter. YouTube Shorts buttons may cover the very bottom.'),
+  R('layout', 'step', 'Distance between cards', 340, 270, 400, 5, '', 'Gap from the centre of one card to the next. Cards are 250 wide, so 270 is nearly touching.')
+];
+const SET = DEFS.filter(d => d.k);
+const HEX = /^#[0-9a-f]{6}$/i;
+const fix = (d, v) => {                                     // makes any value safe
+  if (d.type === 'check') return v === true || v === '1' || v === 1 || v === 'true';
+  if (d.type === 'select') return d.opts.some(o => o[0] === v) ? v : d.def;
+  if (d.type === 'color') return HEX.test(v) ? String(v).toLowerCase() : d.def;
+  if (d.type === 'text') return String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').slice(0, d.max);
+  if (d.type === 'area') return String(v == null ? '' : v).replace(/\r/g, '').slice(0, d.max);
+  v = Number(v);
+  return Number.isFinite(v) ? Math.min(d.max, Math.max(d.min, v)) : d.def;
+};
+const S = {};                                               // current settings; read when needed
+const urlKeys = new Set();                                  // settings fixed by the page address; these ignore the panel and the relay
+let saved = {};
+try { saved = JSON.parse(localStorage.nw_settings2 || '{}') || {}; } catch (e) {}
+for (const d of SET) {
+  const u = params.get(d.k);
+  if (u !== null) urlKeys.add(d.k);
+  S[d.k] = fix(d, u !== null ? u : d.k in saved ? saved[d.k] : d.def);
+}
+const diff = () => { const o = {}; for (const d of SET) if (S[d.k] !== d.def) o[d.k] = S[d.k]; return o; };   // only what differs from the defaults
+const saveLocal = () => { try { localStorage.nw_settings2 = JSON.stringify(diff()); } catch (e) {} };
+let scene = null, relayUp = false, pushTimer = null, lastPush = 0;
+const RELAY_EVENTS = params.get('relay') || (location.protocol.indexOf('http') === 0 ? location.origin + '/events' : 'http://127.0.0.1:8787/events');
+const RELAY_BASE = RELAY_EVENTS.replace(/\/events\/?$/, '');
+function pushNow() {                                        // panel -> relay -> every other open copy (OBS)
+  pushTimer = null; lastPush = Date.now();
+  if (!relayUp || clean) return;
+  fetch(RELAY_BASE + '/settings', { method: 'POST', body: JSON.stringify(diff()) }).catch(() => {});
+}
+function changed() {
+  saveLocal();
+  if (!clean) { clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 300); }
+  if (scene) scene.applyLook();
+}
+
+// ---------- build the control panel ----------
+const controls = {};
+const render = k => {
+  const { d, el, cap } = controls[k];
+  if (d.type === 'check') el.checked = S[k];
+  else if (document.activeElement !== el) el.value = S[k];
+  cap.textContent = d.label + (d.type === 'range' ? ': ' + S[k] + d.unit : d.type === 'color' ? ': ' + S[k] : '');
+};
+const panes = {};
+for (const [id, label] of TABS) {
+  const b = document.createElement('button'); b.textContent = label; b.dataset.tab = id; $('tabs').append(b);
+  const p = document.createElement('div'); p.className = 'pane'; panes[id] = p; $('panes').append(p);
+}
+let curTab = 'chat';
+const showTab = id => {
+  curTab = id;
+  for (const b of $('tabs').children) b.classList.toggle('on', b.dataset.tab === id);
+  for (const k in panes) panes[k].classList.toggle('on', k === id);
+  $('resettab').style.display = id === 'connect' ? 'none' : '';
+};
+$('tabs').onclick = e => { if (e.target.dataset && e.target.dataset.tab) showTab(e.target.dataset.tab); };
+for (const d of DEFS) {
+  if (d.h) { const h = document.createElement('h4'); h.textContent = d.h; if (d.tab === 'cards') { h.style.border = '0'; h.style.fontWeight = 'normal'; } panes[d.tab].append(h); continue; }
+  const row = document.createElement('label'), cap = document.createElement('span'), capBox = document.createElement('span'), tip = document.createElement('span');
+  row.className = 'ctl'; row.dataset.tip = d.tip; capBox.className = 'cap'; tip.className = 'tipi'; tip.textContent = '?';
+  let el;
+  if (d.type === 'select') { el = document.createElement('select'); d.opts.forEach(o => el.add(new Option(o[1], o[0]))); }
+  else if (d.type === 'area') { el = document.createElement('textarea'); el.rows = d.rows || 5; el.maxLength = d.max; el.spellcheck = false; }
+  else {
+    el = document.createElement('input');
+    if (d.type === 'check') { el.type = 'checkbox'; row.classList.add('row'); }
+    else if (d.type === 'color') el.type = 'color';
+    else if (d.type === 'text') { el.type = 'text'; el.maxLength = d.max; }
+    else { el.type = 'range'; el.min = d.min; el.max = d.max; el.step = d.step; }
+  }
+  el.oninput = el.onchange = () => { S[d.k] = fix(d, d.type === 'check' ? el.checked : el.value); render(d.k); changed(); };
+  controls[d.k] = { d, el, cap };
+  capBox.append(cap, tip);
+  if (d.type === 'check') row.append(el, capBox); else row.append(capBox, el);
+  panes[d.tab].append(row);
+  render(d.k);
+}
+// Connect tab (hand-built)
+panes.connect.innerHTML = `
+  <h4>OBS</h4>
+  <div class="note">In OBS add a Browser Source (width 1080, height 1920) and paste the link below. When the relay is running, every change you make in this panel appears in OBS straight away.</div>
+  <button id="link">Copy OBS link</button>
+  <input id="linkbox" readonly placeholder="OBS link appears here">
+  <h4>YouTube API (optional)</h4>
+  <div class="note">Only needed if you do not use the Tampermonkey script. Uses your daily YouTube quota. The key stays in this browser.</div>
+  <input id="vid" placeholder="Live video ID">
+  <input id="key" placeholder="YouTube API key" type="password">
+  <button id="go">Connect to chat</button>`;
+try { $('vid').value = params.get('video') || localStorage.nw_vid || ''; $('key').value = params.get('key') || localStorage.nw_key || ''; } catch (e) {}
+showTab('chat');
+$('hide').onclick = () => { const m = $('main'), h = m.style.display === 'none'; m.style.display = h ? 'flex' : 'none'; $('hide').textContent = h ? 'Hide' : 'Show'; };
+$('resettab').onclick = () => { SET.filter(d => d.tab === curTab).forEach(d => { S[d.k] = d.def; render(d.k); }); changed(); status('This tab was reset'); };
+$('reset').onclick = () => { SET.forEach(d => { S[d.k] = d.def; render(d.k); }); changed(); status('All settings reset'); };
+$('link').onclick = () => {
+  const q = new URLSearchParams();
+  if (!relayUp) { const o = diff(); for (const k in o) q.set(k, typeof o[k] === 'boolean' ? (o[k] ? '1' : '0') : o[k]); }   // no relay: the link must carry the settings
+  q.set('clean', '1');
+  if (params.get('relay')) q.set('relay', params.get('relay'));
+  const url = location.href.split('#')[0].split('?')[0] + '?' + q, box = $('linkbox');
+  box.value = url; box.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+  status((ok ? 'OBS link copied ✓' : 'Link selected below – press Ctrl+C') + (relayUp ? ' Settings sync live from the relay.' : ' (relay offline: settings are inside the link)'));
+};
+// tooltips: hover anywhere on a setting
+const tipEl = $('tipbox');
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest && e.target.closest('[data-tip]');
+  if (!t || !t.dataset.tip) { tipEl.style.display = 'none'; return; }
+  tipEl.textContent = t.dataset.tip; tipEl.style.display = 'block';
+  const r = t.getBoundingClientRect(), u = $('ui').getBoundingClientRect();
+  tipEl.style.left = (u.right + 8) + 'px';
+  tipEl.style.top = Math.max(8, Math.min(r.top, innerHeight - tipEl.offsetHeight - 8)) + 'px';
+});
+document.addEventListener('mouseleave', () => tipEl.style.display = 'none');
+
+// ---------- helpers that read the settings ----------
+const lines = t => String(t).split('\n').map(s => s.trim()).filter(Boolean);
+const getClosers = () => { const l = lines(S.closers); return l.length ? l : CLOSERS; };
+const getCards = () => { const l = lines(S.cards).map(s => s.split('|').map(x => x.trim())).filter(p => p[0] && p[1] && p[2]); return l.length >= 3 ? l : CARDS; };
+const hex = c => parseInt(String(c).slice(1), 16);
+const geom = () => ({ CX: [W / 2 - S.step, W / 2, W / 2 + S.step], CY: S.cy, DECK: [W / 2, S.cy] });
+const CMDS = () => {
+  const w = String(S.cmdwords).toLowerCase().split(',').map(x => x.trim().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+  return new RegExp('^!(?:' + (w.length ? w : ['name', 'write']).join('|') + ')\\s+(.{1,' + S.maxlen + '})', 'i');
+};
+
+// "Type your name" mode: turns a chat message into a name, or '' if it does not look like one
+function nameFromText(t) {
+  t = String(t || '').replace(/\s+/g, ' ').trim().replace(/^@/, '');
+  if (!t || t.charAt(0) === '!' || /https?:|www\./i.test(t)) return '';
+  if (!/\p{L}/u.test(t)) return '';                          // needs at least one letter
+  if (t.split(' ').length > S.maxwords || t.length > S.maxlen) return '';
+  return t;
+}
+const queue = [], lastSeen = {};
+function enqueue(name, who, paid) {
+  name = (name || '').replace(/^@/, '').replace(/\s+/g, ' ').trim().slice(0, S.maxlen);
+  if (!name) return;
+  const key = (who || name).toLowerCase();
+  if (!paid) {
+    if (queue.some(q => !q.paid && q.key === key)) return;  // this chatter is already waiting: ignore repeats (cooldown NOT restarted)
+    const now = Date.now();                                 // 1 free reading per person per 'cooldown' seconds
+    if (lastSeen[key] && now - lastSeen[key] < S.cooldown * 1000) return;
+    lastSeen[key] = now;
+  }
+  const item = { name, paid: !!paid, key };
+  const i = queue.findIndex(q => !q.paid);                  // Super Chats jump the line
+  if (paid) queue.splice(i < 0 ? queue.length : i, 0, item);
+  else {
+    queue.push(item);
+    let free = queue.filter(q => !q.paid).length;           // waiting list is capped: the oldest free name is dropped
+    while (free > S.queue) {
+      const j = queue.findIndex(q => !q.paid), [gone] = queue.splice(j, 1);
+      delete lastSeen[gone.key];                            // the dropped person may try again straight away
+      free--;
+    }
+  }
+  if (scene) scene.next();
+}
+
+const CW = 250, CH = 400;
+const DECK_SIZE = 8;                                    // cards in the shuffled pile (3 real + 5 fillers)
 
 class Main extends Phaser.Scene {
   create() {
     scene = this; this.busy = false;
-    const bg = this.textures.createCanvas('bg', W, H), c = bg.context;
-    const gr = c.createLinearGradient(0, 0, 0, H);
-    gr.addColorStop(0, '#1a0b3b'); gr.addColorStop(.5, '#0b1b4a'); gr.addColorStop(1, '#2a0b3b');
-    c.fillStyle = gr; c.fillRect(0, 0, W, H); bg.refresh();
+    this.bg = this.textures.createCanvas('bg', W, H);
     this.add.image(W / 2, H / 2, 'bg');
     const d = this.textures.createCanvas('dot', 64, 64), dc = d.context;
     const rg = dc.createRadialGradient(32, 32, 0, 32, 32, 32);
     rg.addColorStop(0, '#fff'); rg.addColorStop(.3, '#ffb6f0'); rg.addColorStop(1, 'rgba(255,79,216,0)');
     dc.fillStyle = rg; dc.fillRect(0, 0, 64, 64); d.refresh();
-    this.add.particles(0, 0, 'dot', {
+    this.stars = this.add.particles(0, 0, 'dot', {
       x: { min: 0, max: W }, y: { min: 0, max: H }, scale: { start: .05, end: .25, ease: 'Sine.easeInOut' },
       alpha: { start: 0, end: 0.8, ease: 'Sine.easeOut' }, lifespan: 2500, frequency: 80, blendMode: 'ADD', yoyo: true
     });
@@ -97,98 +337,163 @@ class Main extends Phaser.Scene {
       gravityY: 200, blendMode: 'ADD', emitting: false
     });
     const f = { fontFamily: 'Fredoka, sans-serif', color: '#fff', align: 'center' };
-    this.add.text(W / 2, 150, 'TYPE  !name YOUR NAME', { ...f, fontSize: '64px' }).setOrigin(.5).setShadow(0, 0, '#00e5ff', 20, true, true);
-    this.add.text(W / 2, 225, 'for your tarot reading 🔮', { ...f, fontSize: '42px', color: '#ffd1f5' }).setOrigin(.5);
-    this.qText = this.add.text(W / 2, 1870, '', { ...f, fontSize: '36px', color: '#9fe8ff' }).setOrigin(.5);
-    this.reading = this.add.text(W / 2, 1420, '', { ...f, fontSize: '38px', color: '#fff3c9', wordWrap: { width: 940 }, lineSpacing: 10 }).setOrigin(.5, 0).setAlpha(0);
+    this.title = this.add.text(W / 2, 150, '', { ...f, fontSize: '64px' }).setOrigin(.5);
+    this.sub = this.add.text(W / 2, 225, '', { ...f, fontSize: '42px' }).setOrigin(.5);
+    this.qText = this.add.text(W / 2, 1870, '', { ...f, fontSize: '36px' }).setOrigin(.5);
+    this.reading = this.add.text(W / 2, 1420, '', { ...f, fontSize: '38px', wordWrap: { width: 940 }, lineSpacing: 10 }).setOrigin(.5, 0).setAlpha(0);
+    this.applyLook();
     this.next();
   }
+  spark(x, y, n) { if (S.fx) this.sparks.emitParticleAt(x, y, n); }
+  // Re-applies every setting that affects things already on screen. Runs at start and whenever a setting changes.
+  applyLook() {
+    const c = this.bg.context, gr = c.createLinearGradient(0, 0, 0, H);
+    gr.addColorStop(0, S.bg1); gr.addColorStop(.5, S.bg2); gr.addColorStop(1, S.bg3);
+    c.fillStyle = gr; c.fillRect(0, 0, W, H); this.bg.refresh();
+    this.stars.setVisible(S.fx);
+    this.title.setText(S.mode === 'cmd' ? S.title_cmd : S.mode === 'text' ? S.title_text : S.title_any).setColor(S.tcol).setFontSize(S.tsize).setY(S.ty).setShadow(0, 0, S.glow, 20, true, true);
+    this.sub.setText(S.subtitle).setColor(S.scol).setFontSize(S.ssize).setY(S.sy);
+    this.qText.setColor(S.qcol).setY(S.qy);
+    this.reading.setColor(S.rcol).setFontSize(S.rsize).setY(S.ry);
+    this.updateQ();
+  }
+  updateQ() { this.qText.setText(queue.length && S.waiting ? S.waiting.replace(/\{n\}/g, queue.length) : ''); }
   next() {
-    this.qText.setText(queue.length ? `${queue.length} waiting…` : '');
+    this.updateQ();
     if (this.busy || !queue.length) return;
     this.busy = true;
     this.write(queue.shift());
   }
-  makeCard(c) {
-    const k = this.add.container(DECK[0], DECK[1]), r = (g, s) => g.fillRoundedRect(-CW / 2, -CH / 2, CW, CH, 18);
-    const back = this.add.graphics();
-    back.fillStyle(0x2a1060); r(back); back.lineStyle(6, 0xffd36b); back.strokeRoundedRect(-CW / 2, -CH / 2, CW, CH, 18);
-    back.lineStyle(2, 0xffd36b); back.strokeRoundedRect(-CW / 2 + 16, -CH / 2 + 16, CW - 32, CH - 32, 10);
-    const star = this.add.text(0, 0, '✦', { fontFamily: 'sans-serif', fontSize: '120px', color: '#ffd36b' }).setOrigin(.5);
+  makeCard(c, L) {                                         // c = card data, or null for a face-down filler
+    const k = this.add.container(L.DECK[0], L.DECK[1]), r = g => g.fillRoundedRect(-CW / 2, -CH / 2, CW, CH, 18);
+    const gold = hex(S.cgold), back = this.add.graphics();
+    back.fillStyle(hex(S.cback)); r(back); back.lineStyle(6, gold); back.strokeRoundedRect(-CW / 2, -CH / 2, CW, CH, 18);
+    back.lineStyle(2, gold); back.strokeRoundedRect(-CW / 2 + 16, -CH / 2 + 16, CW - 32, CH - 32, 10);
+    const star = this.add.text(0, 0, '✦', { fontFamily: 'sans-serif', fontSize: '120px', color: S.cgold }).setOrigin(.5);
+    if (!c) { k.faces = []; k.backs = [back, star]; k.add([back, star]); return k; }
     const front = this.add.graphics();
-    front.fillStyle(0xfff4dc); r(front); front.lineStyle(6, 0xc9922e); front.strokeRoundedRect(-CW / 2, -CH / 2, CW, CH, 18);
+    front.fillStyle(hex(S.cface)); r(front); front.lineStyle(6, hex(S.cedge)); front.strokeRoundedRect(-CW / 2, -CH / 2, CW, CH, 18);
     const sym = this.add.text(0, -40, c[1], { fontFamily: 'sans-serif', fontSize: '130px' }).setOrigin(.5);
-    const nm = this.add.text(0, 130, c[0], { fontFamily: 'Fredoka, sans-serif', fontSize: '32px', color: '#3b1a5a', align: 'center', wordWrap: { width: 210 } }).setOrigin(.5);
+    const nm = this.add.text(0, 130, c[0], { fontFamily: 'Fredoka, sans-serif', fontSize: '32px', color: S.cname, align: 'center', wordWrap: { width: 210 } }).setOrigin(.5);
     k.faces = [front, sym, nm]; k.backs = [back, star];
     k.faces.forEach(o => o.setVisible(false));
     k.add([back, star, front, sym, nm]);
     return k;
   }
-  flip(k) {
+  // Moves card k to {x,y,angle} in ONE tween (no clashing x/y tweens). opts: lift (hop height), tilt (wobble degrees).
+  glide(k, to, delay, dur, opts = {}) {
+    this.time.delayedCall(delay, () => {
+      if (!k.scene) return;
+      const x0 = k.x, y0 = k.y, a0 = k.angle, p = { v: 0 }, a1 = to.angle || 0;
+      this.tweens.add({
+        targets: p, v: 1, duration: dur, ease: opts.ease || 'Sine.easeInOut',
+        onUpdate: () => {
+          if (!k.scene) return;
+          const v = p.v, hop = Math.sin(Math.PI * v);
+          k.x = x0 + (to.x - x0) * v;
+          k.y = y0 + (to.y - y0) * v - hop * (opts.lift || 0);
+          k.angle = a0 + (a1 - a0) * v + hop * (opts.tilt || 0);
+        },
+        onComplete: () => { if (k.scene) k.setPosition(to.x, to.y).setAngle(a1); }
+      });
+    });
+  }
+  // Riffle shuffle: split the pile in two, then interleave the halves back together. Returns ms until it is finished.
+  // spd = speed setting (higher = faster), rounds = number of shuffles, D = [x, y] of the pile.
+  shuffle(cards, spd, rounds, D) {
+    const T = ms => ms / spd;
+    let order = cards.slice(), t = T(250);                 // bottom -> top; wait for the fade-in
+    const half = order.length / 2;
+    for (let r = 0; r < rounds; r++) {
+      const A = order.slice(0, half), B = order.slice(half);
+      A.forEach((k, i) => this.glide(k, { x: D[0] - 125 + i * 2, y: D[1] - i * 3, angle: -7 }, t, T(200), { lift: 20 }));
+      B.forEach((k, i) => this.glide(k, { x: D[0] + 125 - i * 2, y: D[1] - i * 3, angle: 7 }, t, T(200), { lift: 20 }));
+      t += T(220);
+      const next = [];
+      for (let i = 0; i < half; i++) next.push(A[i], B[i]);
+      next.forEach((k, pos) => {
+        this.time.delayedCall(t + pos * T(38), () => k.setDepth(pos));
+        this.glide(k, { x: D[0], y: D[1] - pos * 3, angle: 0 }, t + pos * T(38), T(170), { lift: 55, tilt: pos % 2 ? 7 : -7 });
+      });
+      order = next; t += (next.length - 1) * T(38) + T(170) + T(40);
+    }
+    return t;
+  }
+  flip(k, spd) {
     this.tweens.add({
-      targets: k, scaleX: 0, duration: 180, onComplete: () => {
+      targets: k, scaleX: 0, duration: 180 / spd, onComplete: () => {
         k.backs.forEach(o => o.setVisible(false)); k.faces.forEach(o => o.setVisible(true));
-        this.tweens.add({ targets: k, scaleX: 1, duration: 180 });
+        this.tweens.add({ targets: k, scaleX: 1, duration: 180 / spd });
       }
     });
   }
   write(item) {
     const name = item.name;
-    // ---- tarot: draw 3, build a stacked deck, shuffle it ----
-    const pick = Phaser.Utils.Array.Shuffle(CARDS.slice()).slice(0, 3);
-    const deck = [];
-    for (let i = 0; i < 6; i++) {
-      const k = this.makeCard(i >= 3 ? pick[5 - i] : CARDS[0]);
-      k.setPosition(DECK[0] + (i - 3) * 2, DECK[1] - i * 3).setAlpha(0);
-      deck.push(k);
-      this.tweens.add({ targets: k, alpha: 1, duration: 300 });
-      this.tweens.add({ targets: k, x: k.x + (i % 2 ? 50 : -50), yoyo: true, duration: 110, repeat: 3, delay: 250 + i * 40 });
-    }
-    const dealt = [deck[5], deck[4], deck[3]];               // top of the deck first
-    dealt.forEach((k, i) => this.time.delayedCall(300 + i * 450, () => {
-      this.tweens.add({ targets: k, x: CX[i], y: CY, angle: { from: Phaser.Math.Between(-25, 25), to: 0 }, duration: 500, ease: 'Cubic.easeOut' });
-      this.sparks.emitParticleAt(DECK[0], DECK[1], 12);
-    }));
+    // ---- tarot: draw 3, shuffle the pile, deal them into three equally spaced slots ----
+    const spd = S.speed, wr = S.write, rounds = S.shuffles, L = geom();   // settings are read once per reading
+    const pick = Phaser.Utils.Array.Shuffle(getCards().slice()).slice(0, 3);
+    const dealt = pick.map(c => this.makeCard(c, L));
+    const fillers = [];
+    for (let i = 0; i < DECK_SIZE - 3; i++) fillers.push(this.makeCard(null, L));
+    const pile = Phaser.Utils.Array.Shuffle(fillers.concat(dealt));
+    pile.forEach((k, i) => {
+      k.setPosition(L.DECK[0], L.DECK[1] - i * 3).setAlpha(0).setDepth(i);
+      this.tweens.add({ targets: k, alpha: 1, duration: 250 / spd });
+    });
+    const dealStart = this.shuffle(pile, spd, rounds, L.DECK), DEAL_GAP = 200 / spd, DEAL_MS = 400 / spd;
+    const dealEnd = dealStart + 2 * DEAL_GAP + DEAL_MS + 60 / spd, t0 = this.time.now;
+    this.time.delayedCall(dealStart, () => {
+      fillers.forEach(k => this.tweens.add({
+        targets: k, alpha: 0, scale: .85, duration: 350 / spd, onComplete: () => k.destroy()
+      }));
+      dealt.forEach((k, i) => {
+        k.setDepth(50 + i);
+        this.glide(k, { x: L.CX[i], y: L.CY, angle: 0 }, i * DEAL_GAP, DEAL_MS, { lift: 70, tilt: (i - 1) * 10, ease: 'Cubic.easeOut' });
+        this.time.delayedCall(i * DEAL_GAP, () => this.spark(L.DECK[0], L.DECK[1], 12));
+      });
+    });
 
     // ---- name writing ----
-    const t = this.add.text(W / 2, 760, name, {
-      fontFamily: 'Caveat, cursive', fontSize: '260px', color: item.paid ? '#ffe28a' : '#ffffff',
-      stroke: item.paid ? '#ff9a00' : '#ff4fd8', strokeThickness: 8
-    }).setOrigin(.5).setShadow(0, 0, '#00e5ff', 28, true, true);
+    const t = this.add.text(W / 2, S.ny, name, {
+      fontFamily: '"' + S.font + '", cursive', fontSize: S.nsize + 'px', color: item.paid ? S.pcol : S.ncol,
+      stroke: item.paid ? S.pstroke : S.nstroke, strokeThickness: 8,
+      padding: { x: S.npad, y: Math.round(S.npad / 2) }   // extra canvas room so the last letter / tails / glow are not clipped
+    }).setOrigin(.5).setShadow(0, 0, S.glow, 28, true, true);
     if (t.width > 960) t.setScale(960 / t.width);
     const w = t.displayWidth, h = t.displayHeight, left = t.x - w / 2;
     const g = this.make.graphics(); t.setMask(g.createGeometryMask());
     const pen = this.add.image(left, t.y, 'dot').setBlendMode('ADD').setScale(1.6);
     const prog = { v: 0 };
     this.tweens.add({
-      targets: prog, v: 1, duration: Math.min(6000, Math.max(1800, name.length * 380)), ease: 'Sine.easeInOut',
+      targets: prog, v: 1, duration: Math.min(6000, Math.max(1800, name.length * 380)) / wr, ease: 'Sine.easeInOut',
       onUpdate: () => {
         g.clear(); g.fillStyle(0xffffff); g.fillRect(left - 20, t.y - h, (w + 40) * prog.v, h * 2);
         pen.x = left + w * prog.v; pen.y = t.y + Math.sin(prog.v * 50) * h * .22;
-        this.sparks.emitParticleAt(pen.x, pen.y, 2);
+        this.spark(pen.x, pen.y, 2);
       },
       onComplete: () => {
-        pen.destroy(); g.destroy();
-        this.sparks.emitParticleAt(t.x, t.y, 40);
+        pen.destroy(); t.clearMask(true); g.destroy();   // remove the reveal mask from the name BEFORE destroying it, so the name stays visible
+        this.spark(t.x, t.y, 40);
         this.tweens.add({ targets: t, scale: t.scale * 1.06, yoyo: true, duration: 500, repeat: 2 });
         // ---- reveal cards, then the reading ----
-        dealt.forEach((k, i) => this.time.delayedCall(300 + i * 450, () => this.flip(k)));
-        this.time.delayedCall(1900, () => {
-          const [a, b, c] = pick, closer = CLOSERS[Phaser.Math.Between(0, CLOSERS.length - 1)](name);
-          this.reading.setText(`Past · ${a[0]}: ${a[2]}.\nPresent · ${b[0]}: ${b[2]}.\nFuture · ${c[0]}: ${c[2]}.\n\n${closer}`);
+        const wait = Math.max(0, dealEnd - (this.time.now - t0));   // never flip before the cards have landed
+        dealt.forEach((k, i) => this.time.delayedCall(wait + (300 + i * 450) / spd, () => this.flip(k, spd)));
+        this.time.delayedCall(wait + 1900 / spd, () => {
+          const [a, b, c] = pick, cl = getClosers(), closer = cl[Phaser.Math.Between(0, cl.length - 1)].replace(/\{name\}/g, name);
+          this.reading.setText(`${S.lbl1} · ${a[0]}: ${a[2]}.\n${S.lbl2} · ${b[0]}: ${b[2]}.\n${S.lbl3} · ${c[0]}: ${c[2]}.\n\n${closer}`);
           this.tweens.add({ targets: this.reading, alpha: 1, duration: 500 });
         });
-        this.time.delayedCall(1900 + HOLD_MS, () => this.tweens.add({
-          targets: [t, this.reading, ...deck], alpha: 0, duration: 700,
-          onComplete: () => { t.destroy(); deck.forEach(k => k.destroy()); this.reading.setText(''); this.busy = false; this.next(); }
+        this.time.delayedCall(wait + 1900 / spd + S.hold * 1000, () => this.tweens.add({   // name fades together with the reading
+          targets: [t, this.reading, ...dealt], alpha: 0, duration: 700,
+          onComplete: () => { t.destroy(); dealt.forEach(k => k.destroy()); this.reading.setText(''); this.busy = false; this.next(); }
         }));
       }
     });
-    this.qText.setText(queue.length ? `${queue.length} waiting…` : '');
+    this.updateQ();
   }
 }
 
-document.fonts.load('700 100px Caveat').then(() => document.fonts.load('600 40px Fredoka')).catch(() => {}).finally(() => {
+document.fonts.load('700 100px Caveat').then(() => document.fonts.load('700 100px "Dancing Script"')).then(() => document.fonts.load('100px Pacifico')).then(() => document.fonts.load('600 40px Fredoka')).catch(() => {}).finally(() => {
   new Phaser.Game({
     type: Phaser.AUTO, parent: 'game', width: W, height: H, backgroundColor: '#070714',
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, scene: Main
@@ -197,24 +502,48 @@ document.fonts.load('700 100px Caveat').then(() => document.fonts.load('600 40px
 
 // ---------- shared chat handler ----------
 function handleChat(text, author, paid) {
-  if ($('paid').checked && !paid) return;                   // Super Chat only mode
-  const x = String(text).trim().match(/^!(?:name|write)\s+(.{1,24})/i);
+  if (S.paid && !paid) return;                   // Super Chat only mode
+  const x = String(text).trim().match(CMDS());
   if (x) enqueue(x[1], author, paid);
-  else if ($('mode').value === 'any' || paid) enqueue(author, author, paid);
+  else if (S.mode === 'text') {                  // what the viewer types is the name; a paid message falls back to the payer's display name
+    const n = nameFromText(text);
+    if (n) enqueue(n, author, paid); else if (paid) enqueue(author, author, paid);
+  }
+  else if (S.mode === 'any' || paid) enqueue(author, author, paid);
+}
+
+// ---------- settings that arrive from the relay (the panel in another window changed something) ----------
+function onShared(o) {
+  if (!o || typeof o !== 'object') return;
+  if (!clean) {                                  // this window has the panel
+    if (!Object.keys(o).length) { if (Object.keys(diff()).length) pushNow(); return; }   // relay has nothing yet: give it ours
+    if (pushTimer || Date.now() - lastPush < 1500) return;                                // ignore the echo of our own change
+  }
+  for (const d of SET) {
+    if (urlKeys.has(d.k)) continue;
+    const nv = fix(d, d.k in o ? o[d.k] : d.def);
+    if (nv !== S[d.k]) { S[d.k] = nv; render(d.k); }
+  }
+  saveLocal();
+  if (scene) scene.applyLook();
 }
 
 // ---------- local relay (userscript -> relay.js -> here), no API/quota ----------
-const status = s => $('status').textContent = s;
 (function connectRelay() {
-  const es = new EventSource(params.get('relay') || 'http://127.0.0.1:8787/events');
-  es.onopen = () => status('Relay connected ✓ waiting for chat…');
-  es.onerror = () => status('Relay offline – retrying…');
+  const es = new EventSource(RELAY_EVENTS);
+  es.onopen = () => { relayUp = true; status('Relay connected ✓ waiting for chat…'); };
+  es.onerror = () => { relayUp = false; status('Relay offline – retrying…'); };
   es.onmessage = e => { try { const m = JSON.parse(e.data); handleChat(m.text, m.author, m.paid); } catch (x) {} };
+  es.addEventListener('settings', e => { try { onShared(JSON.parse(e.data)); } catch (x) {} });
 })();
 
 // ---------- (optional) YouTube Data API ----------
 let polling = false;
-$('add').onclick = () => { enqueue($('test').value, 'test' + Math.random()); $('test').value = ''; };
+$('add').onclick = async () => {                            // goes through the relay so EVERY open copy (browser tab, OBS) shows it
+  const n = $('test').value; $('test').value = '';
+  try { const r = await fetch(RELAY_BASE + '/test?name=' + encodeURIComponent(n)); if (!r.ok) throw 0; status('Test sent via relay ✓'); }
+  catch (e) { enqueue(n, 'test' + Math.random()); status('Relay offline – written in this tab only'); }
+};
 $('go').onclick = async () => {
   const vid = $('vid').value.trim(), key = $('key').value.trim();
   if (!vid || !key) return status('Need video ID + API key');
