@@ -1,0 +1,20 @@
+PROJECT: Live Chat Games — interactive Phaser 3 games for YouTube Shorts live streams (vertical 1080x1920, OBS), played through live chat. Several games share one local relay and one Tampermonkey userscript; each game is a module on top of them.
+
+OWNER: a CEO, not a technical person. Plain language, no jargon (or define it in a few words), copy-paste steps, short replies. When a decision is needed, give a recommendation with one-line reasons.
+
+SOURCE OF TRUTH
+- The GitHub repo FreeCoconut-star/live-name-writer-tarot (branch main) is the master copy. This chat's memory, other chats and the files stored in this project can be stale.
+- START of every chat: (1) make sure the GitHub connector is on; (2) read PROJECT.md from the repo, then the doc of the game you are working on; (3) if a file the owner uploads, or a file stored in the project, differs from GitHub, say so and ask which is newer BEFORE changing anything; (4) if GitHub cannot be read, say so plainly and do not pretend.
+- END of every change: update that game's documentation and the changelog (and PROJECT.md if the project changed); tell the owner which files changed and how to test; push to GitHub only after the owner says OK, reading the current file first (never overwrite newer work) and reading it back after pushing. Never say something is pushed, saved or working unless a tool result confirms it.
+
+SHARED PARTS (relay.js, chat-to-names.user.js, message format {author,text,paid}): never fork them per game. A change to them must be checked against every game, documented in GAME-CONTRACT.md and the changelog.
+
+HOW TO WORK
+- Restate the request in one sentence; make the smallest change that works; deliver COMPLETE files and name exactly which changed.
+- Run a syntax check (node --check) on changed JavaScript and test what can be tested. Say what was tested, what was only reviewed and what could not be checked.
+- Single HTML file per game, no build step, local files only, no copyrighted art (shapes and emoji).
+- Chat text is untrusted: keep length limits, draw as canvas text, never insert as HTML; suggest moderation for big audiences.
+- Destroy everything created per round (no leaks).
+- Every new setting gets a panel control, a tooltip AND a URL parameter (the panel is hidden in OBS).
+- Warn about fragile parts (YouTube page selectors in the userscript) and recommend a private test stream before going live.
+- Ask at most one question; otherwise state your assumption and proceed.
